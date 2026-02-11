@@ -1,24 +1,27 @@
 # Gesture_Recognition
-通过mediapipe对高通Jester数据集做简单的关键点检测与可视化，将RGB视频流数据转化为手部骨架数据
+通过mediapipe对高通Jester数据集做简单的关键点检测与可视化，将RGB视频流数据转化为手部骨架数据。手部骨架数据（时序图）将作为ST-GCN的输入。
 
 基于ST-GCN实现手势识别：在原模型的基础上进行了修改，使网络适配手部的关键点结构。
-未来会实现笔记本前置摄像头实现手势识别的系统。
+目标为实现笔记本前置摄像头实现手势识别的系统。
 
 ## 基础条件
-数据集：高通Jester
+数据集：高通Jester（高通发布用于人机交互的RGB视频手势数据集）。
 
-姿态估计算法：谷歌Mediapipe
+姿态估计算法：谷歌Mediapipe（本项目使用hand模块，此模块支持对2D图像进行深度估计，下文可见深度效果）。
 
 ![Mediapipe检测效果](example.gif)
 
 原始模型：ST-GCN（https://github.com/yysijie/st-gcn）
 
 ## 关键点可视化
-随机选取一个样本进行可视化
+随机选取一个样本基于Mediapipe库进行可视化
 
 https://github.com/user-attachments/assets/413836fa-fb95-42bc-82d0-309ec7951ed0
 
 https://github.com/user-attachments/assets/c51e2d90-3229-48d3-a341-60668f7f3518
+
+## 模型选取
+我采用了yan提出st-gcn模型网络，并对模型进行了改进使其能够适配手部拓扑结构。此外增加了网络的深度并尝试加入注意力机制。本质上本项目是一个分类任务，因此模型输出为类别的置信度。
 
 ## 训练曲线
 
