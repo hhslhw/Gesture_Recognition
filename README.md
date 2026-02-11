@@ -11,8 +11,6 @@
 
 ![Mediapipe检测效果](example.gif)
 
-原始模型：ST-GCN（https://github.com/yysijie/st-gcn）
-
 ## 关键点可视化
 随机选取一个样本基于Mediapipe库进行可视化
 
@@ -21,7 +19,9 @@ https://github.com/user-attachments/assets/413836fa-fb95-42bc-82d0-309ec7951ed0
 https://github.com/user-attachments/assets/c51e2d90-3229-48d3-a341-60668f7f3518
 
 ## 模型选取
-我采用了yan提出st-gcn模型网络，并对模型进行了改进使其能够适配手部拓扑结构。此外增加了网络的深度并尝试加入注意力机制。本质上本项目是一个分类任务，因此模型输出为类别的置信度。
+我采用了yan提出st-gcn模型网络，并对模型进行了改进使其能够适配手部拓扑结构。此外增加了网络的深度并尝试加入注意力机制。本项目本质上是一个分类任务，因此模型输出为类别的置信度。
+
+原始模型：ST-GCN（https://github.com/yysijie/st-gcn）
 
 ## 训练曲线
 
