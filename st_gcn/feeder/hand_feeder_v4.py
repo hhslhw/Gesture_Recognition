@@ -6,19 +6,17 @@ from torch.utils.data import Dataset
 
 class HandFeeder(Dataset):
     """
-    Feeder for hand gesture recognition dataset (v4 版)
-    Input shape: (N, C, T, V, M=1) 或 (N, C, T, V) → 统一处理为 (N, C, T, V)
-    
-    新增特性：
-        - 支持绝对坐标到相对坐标的归一化 (以第1帧的手腕为原点)
-        - 解决不同位置做相同手势导致网络误判的问题（如把“向下滑动”认成“向上滑动”）
+    手势识别数据集加载器。
+
+    支持以手腕为原点的相对坐标归一化，消除手部绝对位置对识别的干扰。
+    数据文件命名格式：{class_id}_{mode}.npy，例如 1_train.npy、2_val.npy。
 
     Args:
-        data_path: 数据路径 (如 'mediapipe_results' 或 'mmpose_results')
-        mode: 'train' / 'val' / 'test'
-        window_size: 时间窗口长度
-        normalization: 是否进行空间和轨迹归一化（默认设为 True 以大幅提升准确率）
-        debug: 是否只加载前10个样本用于快速测试
+        data_path: npy 数据目录路径
+        mode: 数据集划分，'train' / 'val' / 'test'
+        window_size: 时间窗口帧数
+        normalization: 是否进行坐标归一化（以第0帧手腕为原点做平移）
+        debug: 调试模式，每类只加载前10个样本
     """
 
     def __init__(self,
@@ -82,24 +80,14 @@ class HandFeeder(Dataset):
         return len(self.labels)
 
     def __getitem__(self, index):
-        # 提取当前样本，并进行深度拷贝，防止修改原始数据矩阵
-        data_numpy = np.array(self.data[index])  # shape: (C, T, V)
+        # 深度拷贝，防止修改原始数据
+        data_numpy = np.array(self.data[index])  # (C, T, V)
         label = self.labels[index]
 
-        # =========================================================================
-        # 核心优化：坐标系归一化 (消除手在画面中绝对位置的影响)
-        # =========================================================================
         if self.normalization:
-            # 获取第 1 帧 (t=0) 的第 0 号节点 (通常是 WRIST 手腕) 的坐标
-            # shape: (C,)
-            origin = data_numpy[:, 0, 0]
-            
-            # 扩展维度为 (C, 1, 1)，利用 numpy 广播机制对整个时空矩阵进行相减
-            # 这样处理后，所有动作的起点都在 (0,0,0)，网络可以极其轻易地学习到“相对运动方向”
+            # 以第0帧手腕关键点（节点0）为原点，对整个时空序列做平移归一化
+            # 消除手部绝对位置的影响，使网络专注于学习相对运动方向
+            origin = data_numpy[:, 0, 0]  # (C,)
             data_numpy = data_numpy - origin[:, np.newaxis, np.newaxis]
-            
-            # (可选进阶) 尺度归一化：可以将坐标除以手部的基准长度（如手腕到中指根部的距离）
-            # 避免不同人手掌大小不同带来的误差。目前简单的平移归一化已经足够解决方向混淆问题。
 
-        # 返回形状：(C, T, V)
         return data_numpy, label

@@ -8,26 +8,26 @@ from sklearn.metrics import classification_report, confusion_matrix, precision_r
 # 导入 ST-GCN 模型
 from st_gcn.net.st_gcn_hand_v6 import Model
 
-# ==================== 多流配置项 ====================
-# 你可以自由开启或关闭某一个流。关闭的流将不参与推理。
+# ==================== 多流配置 ====================
+# enable: 是否启用该流；weight: Late Fusion 时的分数权重
 STREAMS = {
     "joint": {
-        "enable": True,                     # 是否开启关节流
-        "model_path": "models/best_new.pth",  # 关节流模型权重路径
-        "data_dir": "mediapipe_results_2",    # 关节流测试集目录
-        "weight": 0.98                       # 融合时的分数权重
+        "enable": True,
+        "model_path": "models/best_new.pth",
+        "data_dir": "data/mediapipe_results_2",
+        "weight": 0.98
     },
     "bone": {
-        "enable": True,                    # 训练好骨骼流模型后，改为 True
+        "enable": True,
         "model_path": "models/best_bone.pth",
-        "data_dir": "mediapipe_bone_results_2",
-        "weight": 0.90                       # 骨骼流融合权重
+        "data_dir": "data/mediapipe_bone_results_2",
+        "weight": 0.90
     },
     "motion": {
-        "enable": True,                    # 训练好运动流模型后，改为 True
+        "enable": True,
         "model_path": "models/best_motion.pth",
-        "data_dir": "mediapipe_motion_results_2",
-        "weight": 0.82                       # 运动流融合权重
+        "data_dir": "data/mediapipe_motion_results_2",
+        "weight": 0.82
     }
 }
 
@@ -95,12 +95,9 @@ def main():
     
     print(f"  => 多流联合总参数量: {total_params / 1e6:.2f} M")
 
-    # ==================== GPU Warmup ====================
-    # 用与实际测试相同的 batch_size 做 warmup，确保 GPU 达到稳定热状态
-    # 避免第一个类别的耗时因 GPU 冷启动而偏高
+    # GPU Warmup：确保 GPU 达到稳定热状态，避免首批推理耗时偏高
     print("\n▶ 正在进行 GPU Warmup...")
     use_cuda = device.type == "cuda"
-    # 使用 batch_size=50（与实际测试集大小一致）做 warmup
     dummy = torch.randn(50, 3, WINDOW_SIZE, 21).to(device)
     with torch.no_grad():
         for _ in range(10):
@@ -158,15 +155,13 @@ def main():
                 if num_samples == 0:
                     num_samples = current_samples
                 
-                # 如果存在多人的 M 维度且 M=1，将其挤压掉（与 HandFeeder v4 一致）
+                # 若存在 M 维度（M=1），挤压掉
                 if len(data.shape) == 5:
                     data = data.squeeze(-1)  # (N, C, T, V, 1) -> (N, C, T, V)
-                
-                # =======================================================
-                # 核心归一化步骤：测试集必须与训练集（HandFeeder v4）保持完全一致
-                # =======================================================
-                origin = data[:, :, 0, 0]  # (N, C) — 第0帧第0关键点(手腕)
-                data_normalized = data - origin[:, :, np.newaxis, np.newaxis]  # 广播到 (N, C, T, V)
+
+                # 坐标归一化：与 HandFeeder 保持一致，以第0帧手腕为原点做平移
+                origin = data[:, :, 0, 0]  # (N, C)
+                data_normalized = data - origin[:, :, np.newaxis, np.newaxis]
                 
                 input_tensor = torch.from_numpy(data_normalized).float().to(device)
                 stream_tensors[stream_name] = input_tensor
@@ -174,7 +169,7 @@ def main():
             if skip_class or num_samples == 0:
                 continue
 
-            # ==================== 仅测量前向传播耗时 ====================
+            # 仅测量前向传播耗时（不含数据加载）
             if use_cuda:
                 torch.cuda.synchronize()
             class_start_time = time.perf_counter()
@@ -203,15 +198,11 @@ def main():
             class_times.append(class_time_ms)
             total_inference_time += (class_end_time - class_start_time)
 
-            # =======================================================
-            # 获取最终的多流综合预测类别
-            # =======================================================
+            # 取融合分数最大值作为预测类别
             confs, preds = torch.max(fused_scores, 1)
-            
-            # 统计正确率
             correct = (preds == true_label).sum().item()
-            
-            # 找出预测错误的样本序号
+
+            # 输出预测错误的样本序号
             incorrect_indices = (preds != true_label).nonzero(as_tuple=True)[0].cpu().numpy().tolist()
             if incorrect_indices:
                 print(f"  [类别 {i}] {action_name:<10}: ❌ 预测错误的样本序号: {incorrect_indices}")
@@ -285,12 +276,10 @@ def main():
         print("\n▶ 详细分类指标:")
         print(df_metrics.to_string(index=False))
 
-        # ==================== 单样本延迟基准测试 (batch_size=1) ====================
-        # 模拟实时摄像头场景：逐个样本推理，测量真实单帧延迟
+        # 单样本延迟基准测试（batch_size=1，模拟实时推理场景）
         print("\n▶ 正在进行单样本延迟基准测试 (batch_size=1, 100次取平均)...")
         single_dummy = torch.randn(1, 3, WINDOW_SIZE, 21).to(device)
-        
-        # 预热
+
         with torch.no_grad():
             for _ in range(10):
                 for model in active_models.values():
@@ -298,7 +287,6 @@ def main():
         if use_cuda:
             torch.cuda.synchronize()
         
-        # 正式测量 100 次
         num_bench_runs = 100
         latencies = []
         with torch.no_grad():
@@ -353,8 +341,7 @@ def main():
                 })
                 df_sys.to_excel(writer, sheet_name="系统性能开销", index=False)
             
-            print(f"\n✅ 测试报告已成功导出为 Excel 文件: {output_xlsx}")
-            print("   （报告内包含: 分类指标表、混淆矩阵表、系统性能开销表，非常适合放入毕业设计报告中！）")
+            print(f"\n✅ 测试报告已导出: {output_xlsx}（分类指标、混淆矩阵、系统性能开销）")
         except Exception as e:
             print(f"⚠️ 导出 Excel 失败 (请确保已安装 pandas 和 openpyxl): {e}")
                 

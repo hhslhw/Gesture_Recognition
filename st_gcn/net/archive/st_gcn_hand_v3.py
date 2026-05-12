@@ -5,11 +5,14 @@ from torch.autograd import Variable
 import numpy as np
 import math
 
+# 假设你已将 net.py 和 unit_gcn.py 放在同目录下
 from .net import Unit2D, conv_init, import_class
 from .unit_gcn import unit_gcn
 
-# 手部骨架边定义（MediaPipe 21关键点拓扑）
+
+# 手部骨架边定义（MediaPipe风格，右手+左手）
 def build_hand_graph():
+    # MediaPipe 手部 21 关节编号
     hand_joint_names = [
         'WRIST',
         'THUMB_CMC', 'THUMB_MCP', 'THUMB_IP', 'THUMB_TIP',
@@ -19,6 +22,7 @@ def build_hand_graph():
         'PINKY_MCP', 'PINKY_PIP', 'PINKY_DIP', 'PINKY_TIP'
     ]
 
+    # 右手连接关系（从近端到远端）
     right_hand_edges = [
         (0, 1), (1, 2), (2, 3), (3, 4),  # 大拇指
         (0, 5), (5, 6), (6, 7), (7, 8),  # 食指
@@ -26,14 +30,17 @@ def build_hand_graph():
         (0, 13), (13, 14), (14, 15), (15, 16),  # 无名指
         (0, 17), (17, 18), (18, 19), (19, 20)  # 小指
     ]
+    # 左手对应右手指序 + 21 偏移
     inward = right_hand_edges
     outward = [(j, i) for (i, j) in inward]
-    self_link = [(i, i) for i in range(21)]
+    neighbor = inward + outward
+    self_link = [(i, i) for i in range(21)]  # 自环
 
     A = get_spatial_graph(num_node=21, self_link=self_link, inward=inward, outward=outward)
     return A
 
-# 图构造工具函数
+
+# 从 test_samples.py 抽取的图构造函数（简化版）
 def edge2mat(link, num_node):
     A = np.zeros((num_node, num_node))
     for i, j in link:
@@ -58,49 +65,31 @@ def get_spatial_graph(num_node, self_link, inward, outward):
     return A
 
 
-# ==============================================================================
-# 骨干网络配置：通道数逐步扩展，最大限制在 256 以防止小数据集过拟合
-# ==============================================================================
+# 默认 backbone 配置（可调整）
 default_backbone_hand = [
     (64, 64, 1),
     (64, 64, 1),
     (64, 128, 2),
     (128, 128, 1),
-    (128, 128, 2),
-    (128, 256, 1),
+    (128, 256, 2),
     (256, 256, 1),
 ]
 
 
 class Model(nn.Module):
     """
-    基于时空图卷积网络（ST-GCN）的手势识别模型。
+    Hand-based action recognition using Spatial Temporal Graph Convolutional Networks.
 
-    网络结构：
-        - 输入层 BatchNorm
-        - 初始 GCN + TCN 特征提取头
-        - 多层 TCN-GCN 骨干网络（支持多尺度）
-        - 可选时空联合注意力模块
-        - 全局平均池化 + 全连接分类头
-
-    Args:
-        channel: 输入坐标维度，默认 3（x, y, z）
-        num_class: 手势类别数
-        window_size: 时间窗口帧数
-        num_point: 手部关键点数，固定为 21（MediaPipe）
-        use_data_bn: 是否对输入做 BatchNorm
-        backbone_config: 骨干网络层配置，None 时使用默认配置
-        mask_learning: 是否启用可学习邻接矩阵掩码
-        use_local_bn: 是否在 GCN 中使用逐节点 BatchNorm
-        multiscale: 是否启用多尺度 TCN-GCN 单元
-        use_attention: 是否启用时空联合注意力模块
-        temporal_kernel_size: 时域卷积核大小，较小的值适合短促手势
-        dropout: Dropout 比率
+    Input shape: (N, C, T, V=21)
+        N: batch size
+        C: channel (x, y, score)
+        T: time frames
+        V: joint number per hand (21)
     """
 
     def __init__(self,
-                 channel=3,
-                 num_class=9,
+                 channel=3,  # 默认参数改为3
+                 num_class=4,  # 根据你的实际类别数调整
                  window_size=35,
                  num_point=21,
                  use_data_bn=True,
@@ -108,8 +97,7 @@ class Model(nn.Module):
                  mask_learning=False,
                  use_local_bn=True,
                  multiscale=False,
-                 use_attention=False,
-                 temporal_kernel_size=5,
+                 temporal_kernel_size=9,
                  dropout=0.5):
         super(Model, self).__init__()
 
@@ -123,9 +111,8 @@ class Model(nn.Module):
         self.num_class = num_class
         self.use_data_bn = use_data_bn
         self.multiscale = multiscale
-        self.use_attention = use_attention
 
-        # 输入 BatchNorm
+        # BatchNorm 设置
         if self.use_data_bn:
             self.data_bn = nn.BatchNorm1d(channel * num_point)
 
@@ -142,10 +129,9 @@ class Model(nn.Module):
         else:
             unit = TCN_GCN_unit
 
-        # 骨干网络
+        # Backbone 网络配置
         if backbone_config is None:
             backbone_config = default_backbone_hand
-            
         self.backbone = nn.ModuleList([
             unit(in_c, out_c, stride=stride, **kwargs)
             for in_c, out_c, stride in backbone_config
@@ -154,7 +140,7 @@ class Model(nn.Module):
         backbone_in_c = backbone_config[0][0]
         backbone_out_c = backbone_config[-1][1]
 
-        # 特征提取头：初始 GCN + TCN
+        # Head 层
         self.gcn0 = unit_gcn(
             channel,
             backbone_in_c,
@@ -164,37 +150,24 @@ class Model(nn.Module):
         )
         self.tcn0 = Unit2D(backbone_in_c, backbone_in_c, kernel_size=9)
 
-        # 分类头
+        # Tail 分类层
         self.person_bn = nn.BatchNorm1d(backbone_out_c)
-        self.fcn = nn.Sequential(
-            nn.Conv1d(backbone_out_c, backbone_out_c, kernel_size=1),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Conv1d(backbone_out_c, num_class, kernel_size=1)
-        )
-        conv_init(self.fcn[0])
-        conv_init(self.fcn[3])
-
-        # 时空联合注意力模块（动态获取 backbone_out_c，避免硬编码）
-        self.attention = SpatialTemporalAttention(backbone_out_c, use_attention=use_attention)
+        self.fcn = nn.Conv1d(backbone_out_c, num_class, kernel_size=1)
+        conv_init(self.fcn)
 
     def forward(self, x):
         N, C, T, V = x.size()
 
         if self.use_data_bn:
-            x = x.reshape(N, C * V, T)
+            x = x.view(N, C * V, T)
             x = self.data_bn(x)
-            x = x.reshape(N, C, T, V)
+            x = x.view(N, C, T, V)
 
         x = self.gcn0(x)
         x = self.tcn0(x)
 
         for m in self.backbone:
             x = m(x)
-
-        # 插入注意力机制
-        if self.use_attention:
-            x = self.attention(x)
 
         # V pooling - joint average
         x = F.avg_pool2d(x, (1, V))
@@ -209,6 +182,7 @@ class Model(nn.Module):
         x = x.squeeze(-1)  # shape: (B, num_class)
 
         return x
+
 
 class TCN_GCN_unit(nn.Module):
     def __init__(self,
@@ -248,6 +222,7 @@ class TCN_GCN_unit(nn.Module):
         x = self.tcn1(self.gcn1(x)) + (x if self.down1 is None else self.down1(x))
         return x
 
+
 class TCN_GCN_unit_multiscale(nn.Module):
     def __init__(self,
                  in_channels,
@@ -264,54 +239,10 @@ class TCN_GCN_unit_multiscale(nn.Module):
     def forward(self, x):
         return torch.cat((self.unit_1(x), self.unit_2(x)), dim=1)
 
+
 # 权重初始化工具函数
 def conv_init(module):
     n = module.out_channels
     for k in module.kernel_size:
         n *= k
     module.weight.data.normal_(0, math.sqrt(2. / n))
-
-
-class SpatialTemporalAttention(nn.Module):
-    """
-    时空联合注意力模块。
-
-    同时对空间维度（关键关节）和时间维度（关键动作帧）计算注意力权重，
-    通过可学习的残差缩放因子与原始特征相加，抑制静止背景噪声并聚焦于运动关节。
-
-    Args:
-        in_channels: 输入特征通道数
-        use_attention: 是否启用注意力（False 时直接透传输入）
-    """
-    def __init__(self, in_channels, use_attention=True):
-        super(SpatialTemporalAttention, self).__init__()
-        self.use_attention = use_attention
-        if use_attention:
-            # 空间维度的1D卷积（针对各个关节）
-            self.spatial_conv = nn.Conv1d(in_channels, 1, kernel_size=1)
-            # 时间维度的1D卷积（针对各个时间帧）
-            self.temporal_conv = nn.Conv1d(in_channels, 1, kernel_size=1)
-            # 可学习的残差缩放因子
-            self.gamma = nn.Parameter(torch.zeros(1))
-
-    def forward(self, x):
-        if not self.use_attention:
-            return x
-
-        B, C, T, V = x.size()
-
-        # 1. 空间注意力 (Spatial Attention)
-        # 求平均池化保留 V 维度，挤压 T 维度
-        x_v = x.mean(dim=2)  # (B, C, V)
-        w_v = torch.sigmoid(self.spatial_conv(x_v))  # (B, 1, V)
-        w_v = w_v.unsqueeze(2)  # (B, 1, 1, V)
-
-        # 2. 时间注意力 (Temporal Attention)
-        # 求平均池化保留 T 维度，挤压 V 维度
-        x_t = x.mean(dim=3)  # (B, C, T)
-        w_t = torch.sigmoid(self.temporal_conv(x_t))  # (B, 1, T)
-        w_t = w_t.unsqueeze(-1)  # (B, 1, T, 1)
-
-        # 3. 注意力加权与残差连接
-        out = x * w_v * w_t
-        return out * self.gamma + x
