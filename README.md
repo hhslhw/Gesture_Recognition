@@ -92,21 +92,46 @@ IDLE ─────────────────► PREPARE ────
 
 ---
 
-## 📊 实验结果
+## 📊 模型评估
 
-### 训练曲线
+> **关于测试集**：测试集由 [`data/unified_keypoint_extraction.py`](data/unified_keypoint_extraction.py:1) 自动从 Jester 数据集划分生成，但脚本无法识别"标注正确但视觉上无法辨认动作类别"的脏样本。为此我对自动生成的测试集做了一次**人工复检**：随机抽样可视化每条样本的关键点序列，剔除手势完全看不出动作意图（手部脱离画面、严重遮挡、关键点漂移）的样本，最终保留 **9 类 × 50 = 450** 条干净样本作为评估集。
 
-| Loss | Accuracy |
+为对比建模选择对系统部署的影响，分别评估了一个**高精度版本**和一个**轻量版本**：
+
+| 指标 | 高精度版本 | 轻量版本 |
+| --- | :---: | :---: |
+| 总体准确率 | **99.33%** | 98.44% |
+| 模型参数量 | 4.13 M | **1.38 M** (-67%) |
+| 单样本批量推理耗时 | 1.37 ms | **0.45 ms** |
+| 批量推理吞吐量 | 727 FPS | **2209 FPS** |
+| 单样本实时推理延迟 | 45.62 ms | **14.75 ms** |
+| 实时推理帧率 (batch=1) | 21.92 FPS | **67.81 FPS** |
+| 评估报告 | [`evaluation_report1.xlsx`](visualization/evaluation_report1.xlsx) | [`evaluation_report2.xlsx`](visualization/evaluation_report2.xlsx) |
+
+> 轻量版本以约 0.9pp 准确率为代价，把参数量压到原来的 1/3、实时帧率提到 3 倍以上，更适合部署在笔记本前置摄像头这类资源受限场景。
+
+### 各类别详细分类指标（轻量版本）
+
+| 动作类别 | Accuracy | Precision | Recall | F1-Score | 单样本耗时 (ms) |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| 单手放大 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.45 |
+| 单手缩小 | 0.9978 | 1.0000 | 0.9800 | 0.9899 | 0.44 |
+| 双指向上滑动 | 0.9911 | 0.9600 | 0.9600 | 0.9600 | 0.44 |
+| 双指向下滑动 | 0.9933 | 0.9796 | 0.9600 | 0.9697 | 0.44 |
+| 双指向右滑动 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.44 |
+| 双指向左滑动 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.44 |
+| 双指拉近 | 0.9956 | 0.9615 | 1.0000 | 0.9804 | 0.44 |
+| 双指放大 | 0.9978 | 0.9804 | 1.0000 | 0.9901 | 0.44 |
+| 拉手靠近 | 0.9933 | 0.9796 | 0.9600 | 0.9697 | 0.55 |
+| **平均 (Macro)** | **0.9965** | **0.9846** | **0.9844** | **0.9844** | **0.45** |
+
+### 混淆矩阵可视化
+
+| 高精度版本 | 轻量版本 |
 | --- | --- |
-| ![loss](visualization/training_loss_curve_4.png) | ![acc](visualization/val_test_accuracy_curve_4.png) |
+| ![cm-large](visualization/confusion_matrix_heatmap1_normalized.png) | ![cm-light](visualization/confusion_matrix_heatmap2_normalized.png) |
 
-### 混淆矩阵（融合 vs 单流）
-
-| 单流（joint）| 三流融合 |
-| --- | --- |
-| ![cm-single](visualization/confusion_matrix_heatmap1_normalized.png) | ![cm-fusion](visualization/confusion_matrix_heatmap_combined_normalized.png) |
-
-详细分类报告（precision / recall / f1）见 [`visualization/evaluation_report1.xlsx`](visualization/evaluation_report1.xlsx:1) 与 [`visualization/evaluation_report2.xlsx`](visualization/evaluation_report2.xlsx:1)。
+完整数据（精确率 / 召回率 / F1 / 混淆矩阵 / 系统性能开销）见两份 Excel 评估报告。
 
 ---
 
