@@ -31,10 +31,9 @@ https://github.com/user-attachments/assets/c51e2d90-3229-48d3-a341-60668f7f3518
 
 画面左上角显示系统状态（静止 / 预备 / 检测 / 冷却），右上角显示当前与历史识别结果及置信度。
 
+https://github.com/user-attachments/assets/47cf0e30-e7c9-40e1-a928-615603688c53
 
-https://github.com/hhslhw/Gesture_Recognition/issues/1#issue-4493053660
-
-https://github.com/hhslhw/Gesture_Recognition/issues/2#issue-4493064125
+https://github.com/user-attachments/assets/768ec158-62f3-4162-9a84-6d85720529b8
 
 ---
 
