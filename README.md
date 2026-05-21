@@ -1,114 +1,254 @@
-# Spatial Temporal Graph Convolutional Networks (ST-GCN)
-A graph convolutional network for skeleton based action recognition.
+# 基于 ST-GCN 的实时手势识别系统
 
-<div align="center">
-    <img src="test_samples/.info/pipeline.png">
-</div>
+> 用 Mediapipe 提取手部 21 个关键点，将 RGB 视频流转为骨架时序数据；改造 ST-GCN 使其适配手部拓扑结构，并通过 **多流 Late Fusion**（joint / bone / motion）+ **注意力机制** 实现 9 类动态手势的实时识别，部署在笔记本前置摄像头上端到端运行。
 
-## Introduction
-This repository holds the codebase, dataset and models for the paper
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)](https://pytorch.org/)
+[![Mediapipe](https://img.shields.io/badge/Mediapipe-Hand-brightgreen)](https://developers.google.com/mediapipe)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-**Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition** Sijie Yan, Yuanjun Xiong and Dahua Lin, AAAI 2018.
+---
 
-[[Arxiv Preprint]](https://arxiv.org/abs/1801.07455)
+## 📌 项目亮点
 
-## Prerequisites
-Our codebase is based on **Python**. There are a few dependencies to run the code. The major python libraries we used are
-- [PyTorch](http://pytorch.org/)
-- NumPy
-- Other Python libraries can be installed by `pip install -r requirements.txt`
+- **从数据到部署的完整流水线**：数据预处理 → 关键点提取 → 模型训练 → 多流融合评估 → 实时推理 GUI。
+- **针对手部拓扑改造的 ST-GCN**：在原版 ST-GCN（Yan et al., AAAI 2018）基础上修改图结构与分区策略，使空域图卷积适配 21 节点手部骨架；增加网络深度并引入注意力模块。
+- **多流 Late Fusion**：训练 joint / bone / motion 三个独立流，推理阶段以加权置信度融合，相比单流模型取得稳定提升。
+- **状态机驱动的实时系统**：IDLE → PREPARE → DETECT → COOLDOWN 四态切换，结合手部位移阈值判定，避免无效推理与误触发。
+- **可视化齐全**：网络结构图、手部图拓扑/邻接矩阵/分区策略、训练曲线、各流 / 融合后混淆矩阵均已生成并提供脚本复现。
 
-## Data Preparation
-We experimented on two skeleton-based action recognition datasts: [NTU RGB+D](http://rose1.ntu.edu.sg/datasets/actionrecognition.asp) and [Kinetics-skeleton](https://s3-us-west-1.amazonaws.com/yysijie-data/public/kinetics-skeleton/kinetics-skeleton.zip). 
-### NTU RGB+D
-NTU RGB+D can be downloaded from [their website](http://rose1.ntu.edu.sg/datasets/actionrecognition.asp). Only the **3D skeletons**(5.8GB) modality is required in our experiments. After that, this command should be used to build the database for training or evaluation:
+---
+
+## 🎬 效果演示
+
+### Mediapipe 关键点提取效果
+
+https://github.com/user-attachments/assets/413836fa-fb95-42bc-82d0-309ec7951ed0
+
+https://github.com/user-attachments/assets/c51e2d90-3229-48d3-a341-60668f7f3518
+
+### 实时手势识别系统
+
+画面左上角显示系统状态（静止 / 预备 / 检测 / 冷却），右上角显示当前与历史识别结果及置信度。
+
+https://github.com/user-attachments/assets/8c2c3b02-58a9-442d-8910-bcae778ea550
+
+https://github.com/user-attachments/assets/bb540725-5f0a-4e87-a38b-2498c95f934a
+
+---
+
+## 🧠 方法概述
+
+### 1. 数据 & 关键点提取
+
+- **数据集**：高通 [Jester](https://www.qualcomm.com/developer/software/jester-dataset)，从中筛选 9 类与人机交互强相关的动态手势：
+
+  > 单手放大 / 单手缩小 / 双指向上滑动 / 双指向下滑动 / 双指向右滑动 / 双指向左滑动 / 双指拉近 / 双指放大 / 拉手靠近
+
+- **姿态估计**：[MediaPipe Hands](https://developers.google.com/mediapipe/solutions/vision/hand_landmarker)，每帧输出 21 个手部关键点 (x, y, z)。
+- **缺帧补偿**：对漏检帧使用三次样条插值（[`scipy.interpolate`](https://docs.scipy.org/doc/scipy/reference/interpolate.html)），统一对齐到 `T = 35` 帧。
+- **多流构造**：在 joint 数据基础上派生 bone（相邻关键点差分）与 motion（相邻帧差分）两路输入。
+
+### 2. 网络结构
+
+基于 ST-GCN，改动如下：
+
+| 模块 | 改动 |
+| --- | --- |
+| 图结构 | 重新定义手部 21 节点邻接矩阵与分区策略（root / centripetal / centrifugal） |
+| 网络深度 | 堆叠 10 层 ST-GCN block，逐步增加通道维度 |
+| 注意力 | 在每个 block 输出后加入空间注意力，按节点重要性加权 |
+| 时间维度 | TCN 卷积核覆盖 9 帧感受野 |
+
+输入张量形状：`(N, C=3, T=35, V=21, M=1)`，输出 9 类置信度。
+
+> 可视化：[`visualization/hand_graph_topology.png`](visualization/hand_graph_topology.png:1)、[`visualization/hand_graph_partitions.png`](visualization/hand_graph_partitions.png:1)、[`visualization/st_gcn_arch_diagram.png`](visualization/st_gcn_arch_diagram.png:1)
+
+### 3. 多流 Late Fusion
+
 ```
-python tools/ntu_gendata.py --data_path <path to nturgbd>
-```
-where the ```<path to nturgbd>``` points to the 3D skeletons modality of NTU RGB+D dataset you download, for example ```data/NTU-RGB-D/nturgbd+d_skeletons```.
-### Kinetics-skeleton
-[Kinetics](https://deepmind.com/research/open-source/open-source-datasets/kinetics/) is a video-based dataset for action recognition which only provide raw video clips without skeleton data. To obatin the joint locations, we first resized all videos to the resolution of 340x256 and converted the frame rate to 30 fps.  Then, we extracted skeletons from each frame in Kinetics by [Openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose). The extracted skeleton data we called **Kinetics-skeleton**(7.5GB) can be directly downloaded from [here](https://s3-us-west-1.amazonaws.com/yysijie-data/public/kinetics-skeleton/kinetics-skeleton.zip).
-
-It is highly recommended storing data in the **SSD** rather than HDD for efficiency.
-
-
-##  Testing Pretrained Models
-### Get trained models
-We provided the pretrained model weithts of our **ST-GCN** and the baseline model Temporal-Conv[1]. The model weights can be downloaded by running the script
-```
-bash tools/get_models.sh
-```
-The downloaded models will be stored under the ```./model```.
-
-### Evaluation
-Once datasets and models ready, we can start the evaluation.
-<!-- Use the folloing command to evaluate our **ST-GCN** model:
-```
-python main.py --config config/st_gcn/<dataset>/test.yaml
-```
-where the ```<dataset>``` can be  -->
-
-To evaluate ST-GCN model pretrained on **Kinetcis-skeleton**, run
-```
-python main.py --config config/st_gcn/kinetics-skeleton/test.yaml
-```
-For **cross-view** evaluation in **NTU RGB+D**, run
-```
-python main.py --config config/st_gcn/nturgbd-cross-view/test.yaml
-```
-For **cross-subject** evaluation in **NTU RGB+D**, run
-```
-python main.py --config config/st_gcn/nturgbd-cross-subject/test.yaml
-```
-
-Similary, the configuration file for testing baseline models can be found under the ```./config/baseline```.
-
-To speed up evaluation by multi-gpu inference or modify batch size for reducing the memory cost, set ```--test-batch-size``` and ```--device``` like:
-```
-python main.py --config <config file> --test-batch-size <batch size> --device <gpu0> <gpu1> ...
-```
-
-### Results
-The expected **Top-1** **accuracy** of provided models are shown here:
-
-| Model| Kinetics-<br>skeleton (%)|NTU RGB+D <br> Cross View (%) |NTU RGB+D <br> Cross Subject (%) |
-| :------| :------: | :------: | :------: |
-|Baseline[1]| 20.3    | 83.1     |  74.3    |
-|**ST-GCN** (Ours)| **30.6**| **88.9** | **80.7** | 
-
-[1] Kim, T. S., and Reiter, A. 2017. Interpretable 3d human action analysis with temporal convolutional networks. In BNMW CVPRW. 
-
-## Training
-To train a new ST-GCN model, run 
-```
-python main.py --config config/st_gcn/<dataset>/train.yaml [--work-dir <work folder>]
-```
-where the ```<dataset>``` must be ```nturgbd-cross-view```, ```nturgbd-cross-subject``` or ```kinetics-skeleton```, depending on the dataset you want to use. The training results, including **model weights**, configurations and logging files, will be saved under the ```./work_dir``` by default or ```<work folder>``` if you appoint it.
-
-You can modify the training parameters such as ```work-dir```, ```batch-size```, ```step```, ```base_lr``` and ```device``` in the command line or configuration files. The order of priority is:  command line > config file > default parameter. For more information, use ```main.py -h```.
-
-Finally, custom model evaluation can be achieved by this command as we mentioned above:
-```
-python main.py --config config/st_gcn/<dataset>/test.yaml --weights <path to model weights>
+joint_logits  ──┐
+bone_logits   ──┼──►  softmax & 加权求和  ──►  argmax  ──►  类别
+motion_logits ──┘
 ```
 
-## Citation
-Please cite the following paper if you use this repository in your reseach.
+权重由各流在验证集上的准确率确定（`joint=1.0 / bone=0.90 / motion=0.82`），见 [`gesture_app_with_camera.py`](gesture_app_with_camera.py:20)。
+
+### 4. 实时系统状态机
+
 ```
-@inproceedings{stgcn2018aaai,
-  title     = {Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition},
-  author    = {Sijie Yan and Yuanjun Xiong and Dahua Lin},
-  booktitle = {AAAI},
-  year      = {2018},
-}
+        位移 > 阈值                  到时
+IDLE ─────────────────► PREPARE ─────────► DETECT
+  ▲                                          │
+  │                                          ▼
+  └──────  COOLDOWN  ◄───────────────  推理输出
+              已冷却 2s
 ```
 
-## Contact
-For any question, feel free to contact
+- `IDLE`：监测手部位移，连续静止 1s 后才允许触发。
+- `PREPARE`：0.5s 倒计时，给用户做好动作的时间。
+- `DETECT`：以滑窗 (`stride=5`) 推理，达到置信度阈值即输出。
+- `COOLDOWN`：2s 冷却，避免连击误触。
+
+---
+
+## 📊 实验结果
+
+### 训练曲线
+
+| Loss | Accuracy |
+| --- | --- |
+| ![loss](visualization/training_loss_curve_4.png) | ![acc](visualization/val_test_accuracy_curve_4.png) |
+
+### 混淆矩阵（融合 vs 单流）
+
+| 单流（joint）| 三流融合 |
+| --- | --- |
+| ![cm-single](visualization/confusion_matrix_heatmap1_normalized.png) | ![cm-fusion](visualization/confusion_matrix_heatmap_combined_normalized.png) |
+
+详细分类报告（precision / recall / f1）见 [`visualization/evaluation_report1.xlsx`](visualization/evaluation_report1.xlsx:1) 与 [`visualization/evaluation_report2.xlsx`](visualization/evaluation_report2.xlsx:1)。
+
+---
+
+## 📁 项目结构
+
 ```
-Sijie Yan     : ys016@ie.cuhk.edu.hk
-Yuanjun Xiong : bitxiong@gmail.com
+ST-GCN/
+├── data/                              # 数据处理脚本（不含原始数据）
+│   ├── classify_dataset.py            #   按标注划分 Jester 数据集
+│   ├── process_dataset.py             #   裁剪/重采样视频
+│   ├── unified_keypoint_extraction.py #   关键点提取（支持补帧 & 多算法切换）
+│   ├── keypoint_extraction.py         #   早期单算法版本
+│   ├── generate_stream_data.py        #   生成 bone / motion 流数据
+│   └── check_valid_frames.py          #   有效帧统计
+│
+├── st_gcn/
+│   ├── graph/                         # 图结构定义（手部拓扑、邻接矩阵、分区）
+│   ├── feeder/                        # PyTorch Dataset
+│   │   └── hand_feeder_v4.py          #   当前使用的 Feeder
+│   └── net/
+│       ├── st_gcn_hand_v6.py          #   当前使用的网络（含注意力 & 多流支持）
+│       ├── st_gcn.py                  #   原版 ST-GCN（参考实现）
+│       ├── tcn.py / unit_gcn.py       #   时间/空间卷积单元
+│       └── archive/                   #   历史迭代版本（v2~v5）
+│
+├── visualization/                     # 可视化脚本与结果
+│   ├── visualize_hand_graph.py        #   绘制手部图结构与分区策略
+│   ├── visualize_arch_diagram.py      #   绘制网络架构图
+│   ├── confusion_matrix_heatmap.py    #   绘制混淆矩阵
+│   ├── training_log_visualizer.py     #   解析训练日志并绘图
+│   └── *.png / *.xlsx                 #   实验结果输出
+│
+├── test_samples/                      # 单样本调试用素材
+│
+├── tools/                             # 辅助测试脚本
+│
+├── train.py                           # 训练入口
+├── test_model.py                      # 多流融合评估
+├── real_time.py                       # 实时识别（命令行 / OpenCV 窗口）
+├── gesture_app_with_camera.py         # 实时识别 GUI（CustomTkinter）
+└── main.py                            # 兼容入口（参考原 ST-GCN 设计）
 ```
-#你需要新写一个脚本，替代1_process_dataset.py和2_keypoint_extraction_v5.py功能。这个脚本与之前的两个脚本实现的功能一致，输入输出的数据一致。同样可以指定动作类别，和每个样本动作数。
-不同点在于，它有两个开关，补帧开关和算法选择开关。
-补帧开关打开时，可使用算法对视频进行检测，输出的手部
+
+---
+
+## 🚀 快速上手
+
+### 1. 环境
+
+```bash
+git clone https://github.com/hhslhw/Gesture_Recognition.git
+cd Gesture_Recognition
+pip install -r requirements.txt   # 若无 requirements.txt，可手动安装下方依赖
+```
+
+主要依赖：
+
+```
+torch>=2.0
+mediapipe>=0.10
+opencv-python
+numpy
+scipy
+scikit-learn
+pandas
+matplotlib
+pillow
+customtkinter
+tensorboard
+```
+
+### 2. 模型权重下载
+
+仓库未包含 `.pth` 权重文件（体积过大）。请将下载的权重放入 `models/` 目录：
+
+```
+models/
+├── best_new.pth      # joint 流
+├── best_bone.pth     # bone 流
+└── best_motion.pth   # motion 流
+```
+
+> 权重下载链接：**待补充**（建议放百度网盘 / Google Drive / Hugging Face Hub）。
+
+### 3. 实时手势识别 GUI
+
+```bash
+python gesture_app_with_camera.py
+```
+
+打开后选择前置摄像头即可开始识别。
+
+### 4. 离线评估
+
+```bash
+python test_model.py
+```
+
+输出各流单独准确率与三流融合后的混淆矩阵 / 分类报告。
+
+### 5. 从零训练
+
+```bash
+# Step 1. 划分数据集（基于 Jester 标注）
+python data/classify_dataset.py
+
+# Step 2. 提取关键点并补帧
+python data/unified_keypoint_extraction.py
+
+# Step 3. 生成 bone / motion 流（可选，用于多流训练）
+python data/generate_stream_data.py
+
+# Step 4. 训练
+python train.py
+```
+
+训练日志会写入 `logs/` 与 `runs/`（TensorBoard）。
+
+---
+
+## 🔧 关键超参数
+
+| 参数 | 值 | 位置 |
+| --- | --- | --- |
+| 时间窗口 `T` | 35 | [`train.py`](train.py:21) |
+| 通道数 `C` | 3 (x, y, z) | [`train.py`](train.py:20) |
+| 关键点数 `V` | 21 | Mediapipe Hand |
+| Batch size | 16 | [`train.py`](train.py:22) |
+| Epoch | 100 | [`train.py`](train.py:23) |
+| 学习率 | 5e-4，CosineAnnealing | [`train.py`](train.py:24) |
+| 优化器 | Adam | [`train.py`](train.py) |
+| 注意力 | ✅ 开启 | [`train.py`](train.py:29) |
+
+---
+
+## 📝 致谢与参考
+
+- 原始 ST-GCN：[yysijie/st-gcn](https://github.com/yysijie/st-gcn)
+- 论文：Yan, Sijie, Yuanjun Xiong, and Dahua Lin. *"Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition."* AAAI 2018. [[arXiv](https://arxiv.org/abs/1801.07455)]
+- 数据集：Qualcomm Jester Dataset
+- 关键点检测：[Google MediaPipe Hands](https://developers.google.com/mediapipe/solutions/vision/hand_landmarker)
+
+## 📄 License
+
+本项目基于 [MIT License](LICENSE) 开源。原 ST-GCN 部分代码遵循其原始许可。

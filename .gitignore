@@ -1,24 +1,44 @@
-#custom
-work_dir/*
-data/*
-config_v0/*
-.vscode
-model/*
+# ============================================
+# 项目特定忽略规则
+# ============================================
 
-# Byte-compiled / optimized / DLL files
+# 训练输出与日志（不上传）
+runs/
+logs/
+work_dir/
+log/
+
+# 模型权重（不上传，体积大；详见 README 中的下载说明）
+models/
+model/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+
+# data/ 目录下只保留 .py 脚本
+# 思路：先忽略 data 下所有内容，再用 !data/*.py 重新加入 .py 文件
+data/**
+!data/*.py
+
+# 如果未来在 data 下增加子目录里的脚本，可在这里追加例外：
+# !data/<sub_dir>/
+# !data/<sub_dir>/*.py
+
+# st_gcn 内部 archive 目录中的旧版本实验代码（视情况保留/排除，默认保留）
+# st_gcn/**/archive/
+
+# ============================================
+# Python 通用
+# ============================================
+
+# 字节码 / 缓存
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-*.npy
-*.mp4
-*.json
-*.txt
-*.xlsx
 
-# Distribution / packaging
+# 打包/分发产物
 .Python
 build/
 develop-eggs/
@@ -37,16 +57,14 @@ wheels/
 *.egg
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
-# Installer logs
+# 安装日志
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
+# 测试 / 覆盖率
 htmlcov/
 .tox/
 .coverage
@@ -56,56 +74,44 @@ nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
+.pytest_cache/
 
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
+# Jupyter
 .ipynb_checkpoints
 
-# pyenv
-.python-version
-
-# celery beat schedule file
-celerybeat-schedule
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
+# 环境
 .env
 .venv
 env/
 venv/
 ENV/
 
-# Spyder project settings
+# pyenv
+.python-version
+
+# Spyder / Rope
 .spyderproject
 .spyproject
-
-# Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
+# ============================================
+# 操作系统 / 临时文件
+# ============================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 
-# mypy
-.mypy_cache/
+# ============================================
+# 大体积中间产物（按需排除，主要由上面的 data/、models/ 已覆盖）
+# ============================================
+*.mp4
+*.avi
+*.mov
+
+# 注意：故意不全局忽略 *.npy / *.xlsx / *.png / *.csv
+#   - test_samples/*.npy   作为 demo 输入需要保留
+#   - visualization/*.xlsx 评估结果需要保留
+#   - visualization/*.png  实验结果图需要保留
+# 如果未来某个目录下产生大量这类临时文件，请在该目录下新增局部 .gitignore
