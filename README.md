@@ -214,7 +214,7 @@ models/
 └── best_motion.pth   # motion 流
 ```
 
-> 权重下载链接：**待补充**（建议放百度网盘 / Google Drive / Hugging Face Hub）。
+> 权重获取：请发送邮件至2065610956@qq.com。
 
 ### 3. 实时手势识别 GUI
 
